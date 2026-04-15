@@ -24,6 +24,6 @@ decay_steps: 2000000
 alpha: 0.1
 patience: 20
 batch_size: 64
-epochs: 50
+epochs: 200
 train_valid_fraction: 0.92
 chunk_size: 10240  # should be a multiple of batch_size

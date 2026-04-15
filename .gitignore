@@ -3,3 +3,5 @@
 *.png
 output.json
 ckpt/*
+__pycache__
+model.keras

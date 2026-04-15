@@ -84,7 +84,7 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
  - You can plot the training history using
 
     ```bash
-    python plot_history.py ckpt/checkpoint.history.json
+    python plot_history.py ckpt/checkpoint.history.json -o history.png
     ```
 
  - You can plot the output network and get flavour tagging performance metrics using
