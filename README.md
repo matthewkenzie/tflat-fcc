@@ -25,6 +25,8 @@ pip install 'tensorflow[and-cuda]'
 pip install pandas
 pip install pyarrow
 pip install PyYAML
+pip install uproot
+pip install awkward
 pip install matplotlib
 ```
 
