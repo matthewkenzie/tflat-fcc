@@ -40,6 +40,9 @@ follow the instructions on this page: https://www.tensorflow.org/install/pip
 ---
 
 ## Hardware Requirements
+
+*This section is inherited from the Belle-II model. It will need updating for the FCC attempts.*
+
 The training process requires a CUDA capable GPU.\
 Your GPU should have 8GB VRAM and your PC should have 16GB RAM.\
 The time needed to complete a training depends on the specific GPU. For a NVIDIA A100 GPU the expected time to completion with 10M training samples is ~1 days.\
@@ -50,13 +53,13 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
 
 1. **Data preparation**
 
-Prepare the training file (`hd5` format is used because it can read very efficiently from chunks):
+ - Prepare the training file (`hd5` format is used because it can read very efficiently from chunks):
 
-```bash
-python process.py
-```
+   ```bash
+   python process.py
+   ```
 
-There is some metadata saved in the output training file as well as the training arrays.
+ - There is some metadata saved in the output training file as well as the training arrays.
 
 2. **Training**
 
