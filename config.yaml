@@ -1,0 +1,29 @@
+# ── Architecture parameters ──────────────────────────────────────────────────
+# Feature counts must match what process.py produces.
+parameters:
+  clip_value: 4
+  mask_value: 0
+  num_trk: 30              # MAX_NTRACKS in process.py
+  num_trk_features: 11     # len(TRACK_FEATURES) in process.py
+  num_photon: 35           # MAX_NPHOTONS in process.py
+  num_photon_features: 3   # len(PHOTON_FEATURES) in process.py
+  num_evt: 1               # event features treated as a single-element sequence
+  num_evt_features: 4      # len(EVENT_FEATURES) in process.py
+  num_transformer_blocks: 6
+  num_heads: 4
+  embedding_dims: 128
+  mlp_hidden_units_factors:
+  - 2
+  - 1
+  dropout_rate: 0.1
+
+# ── Training parameters ─────────────────────────────────────────────────────
+weight_decay: 0.0001
+initial_learning_rate: 0.0001
+decay_steps: 2000000
+alpha: 0.1
+patience: 20
+batch_size: 64
+epochs: 50
+train_valid_fraction: 0.92
+chunk_size: 10240  # should be a multiple of batch_size
