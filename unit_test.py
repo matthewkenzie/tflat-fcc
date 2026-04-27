@@ -29,9 +29,11 @@ from model import get_tflat_model
 # ── Constants ─────────────────────────────────────────────────────────────
 CONFIG_PATH      = os.path.join(os.path.dirname(__file__), "unit_test_config.yaml")
 FULL_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
-ROOT_FILE        = os.path.join(os.path.dirname(__file__), "FCCee_FT_tuples", "Bd_test.root")
-N_EVENTS    = 256   # enough for a train/val split with batch_size=64
-N_FIXTURE   = 256   # events subsampled for the integration test
+# Integration test uses the full ROOT file so we can request 5K-10K events
+ROOT_FILE        = os.path.join(os.path.dirname(__file__), "FCCee_FT_tuples", "Bd_full.root")
+MAX_EVENTS  = 8_000  # events to read from the ROOT file
+N_EVENTS    = 256    # synthetic events for unit tests
+N_FIXTURE   = 512    # events subsampled into the shape-check fixture
 # Expected feature width from unit_test_config.yaml (dndx=False default)
 # 4 event + 30*11 track + 35*3 photon
 _p = load_config(CONFIG_PATH)["parameters"]
@@ -147,15 +149,15 @@ def _train_cfg():
 
 
 def _slow_train_cfg():
-    """Return a realistic training config targeting ~5 min on Bd_test.root.
+    """Return a realistic training config targeting ~5 min on Bd_full.root.
 
-    Uses the full config.yaml (embedding_dims=128) on all ~978 processed events.
-    At ~13 s/epoch (14 batches of 64 on 900 train events) this runs for
-    roughly 20 × 13 s ≈ 4.3 min of pure training.
+    Uses the full config.yaml (embedding_dims=128) on MAX_EVENTS=8000 events.
+    At ~68 s/epoch (115 batches of 64 on 7360 train events) this runs for
+    roughly 4 × 68 s ≈ 4.5 min of training (plus ~60 s for process.py).
     """
     cfg = load_config(FULL_CONFIG_PATH)
-    cfg["epochs"]   = 20
-    cfg["patience"] = 10   # allow early stopping if it genuinely converges
+    cfg["epochs"]   = 4
+    cfg["patience"] = 4
     return cfg
 
 
@@ -179,7 +181,9 @@ def test_full_pipeline(tmp_path):
     root_out     = h5_out.replace(".h5", ".root")
 
     # ── Step 1: process ROOT → HDF5 + fixture ─────────────────────────────
-    process(ROOT_FILE, h5_out, fixture_path=fixture_path, fixture_events=N_FIXTURE)
+    process(ROOT_FILE, h5_out,
+            fixture_path=fixture_path, fixture_events=N_FIXTURE,
+            max_events=MAX_EVENTS)
 
     assert os.path.isfile(h5_out),   "HDF5 output not created"
     assert os.path.isfile(root_out), "ROOT mirror not created"

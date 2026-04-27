@@ -114,14 +114,15 @@ def pad_and_flatten(jagged, features, max_n):
 
 
 def process(input_file, output_file, dndx=False, getpid=False,
-            fixture_path=None, fixture_events=512):
+            fixture_path=None, fixture_events=512, max_events=None):
     """Read raw ROOT, process, pad, flatten, and save to HDF5."""
 
     tree = uproot.open(input_file + ":events")
+    kw   = dict(entry_stop=max_events)   # passed to every tree.arrays() call
     # Per-particle fields (charged + neutral)
-    par = tree.arrays(["Rec_q", "Rec_p", "Rec_eta", "Rec_phi", "Rec_true_PDG"])
+    par = tree.arrays(["Rec_q", "Rec_p", "Rec_eta", "Rec_phi", "Rec_true_PDG"], **kw)
     # Track-specific fields (same per-particle ordering, 0 for neutrals)
-    trk = tree.arrays(["Rec_track_d0", "Rec_track_z0", "Rec_track_dNdx"])
+    trk = tree.arrays(["Rec_track_d0", "Rec_track_z0", "Rec_track_dNdx"], **kw)
 
     # ── Photons ─────────────────────────────────────────────────────────────
     photon_mask = par["Rec_true_PDG"] == PHOTON_ID
@@ -158,13 +159,13 @@ def process(input_file, output_file, dndx=False, getpid=False,
 
 
     # ── Event-level features ────────────────────────────────────────────────
-    event = tree.arrays(GLOB_VARS)
+    event = tree.arrays(GLOB_VARS, **kw)
     event_flat = np.column_stack([
         ak.to_numpy(event[v]).astype(np.float32) for v in GLOB_VARS
     ])
 
     # ── Target  ─────────────────────────────────────────────────────────────
-    target = tree.arrays(["MC_B_qTag"])
+    target = tree.arrays(["MC_B_qTag"], **kw)
     target_flat = target["MC_B_qTag"].to_numpy().astype(np.int32)
 
     # ── Pad and flatten variable-length arrays ────────────────────────────────────
@@ -239,6 +240,8 @@ if __name__ == "__main__":
                         help="Also write a small test fixture HDF5 alongside the main output")
     parser.add_argument("--fixture-events", type=int, default=512, metavar="N",
                         help="Number of events to include in the fixture")
+    parser.add_argument("--max-events", type=int, default=None, metavar="N",
+                        help="Stop after reading this many events (useful for testing)")
     args = parser.parse_args()
 
     if args.save_dndx:
@@ -247,4 +250,5 @@ if __name__ == "__main__":
         args.output = args.output.replace(".h5","_pid.h5")
 
     process(args.input, args.output, args.save_dndx, args.get_pid,
-            fixture_path=args.fixture, fixture_events=args.fixture_events)
+            fixture_path=args.fixture, fixture_events=args.fixture_events,
+            max_events=args.max_events)
