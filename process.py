@@ -43,10 +43,14 @@ def _load_pid_tools():
     spec = importlib.util.spec_from_file_location(
         "pid_tools", os.path.join(PID_PACKAGE, "get_pid.py"))
     mod = importlib.util.module_from_spec(spec)
+    import io
+    _old_stderr, sys.stderr = sys.stderr, io.StringIO()
     try:
         spec.loader.exec_module(mod)
     except (SystemExit, AssertionError):
         pass  # functions are defined before argparse/assertions run
+    finally:
+        sys.stderr = _old_stderr
     return mod.read_classifiers, mod.make_prediction, mod.get_features
 
 
