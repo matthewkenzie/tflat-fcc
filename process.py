@@ -114,7 +114,8 @@ def pad_and_flatten(jagged, features, max_n):
 
 
 def process(input_file, output_file, dndx=False, getpid=False,
-            fixture_path=None, fixture_events=512, max_events=None):
+            fixture_path=None, fixture_events=512, max_events=None,
+            max_ntracks=MAX_NTRACKS, max_nphotons=MAX_NPHOTONS):
     """Read raw ROOT, process, pad, flatten, and save to HDF5."""
 
     tree = uproot.open(input_file + ":events")
@@ -173,8 +174,8 @@ def process(input_file, output_file, dndx=False, getpid=False,
         trk_feats = [t for t in TRACK_FEATURES if t != "track_dndx"]
     else:
         trk_feats = TRACK_FEATURES
-    track_flat  = pad_and_flatten(tracks,  trk_feats,  MAX_NTRACKS)
-    photon_flat = pad_and_flatten(photons, PHOTON_FEATURES, MAX_NPHOTONS)
+    track_flat  = pad_and_flatten(tracks,  trk_feats,  max_ntracks)
+    photon_flat = pad_and_flatten(photons, PHOTON_FEATURES, max_nphotons)
 
     # ── Concatenate: event | tracks | photons ───────────────────────────────
     X = np.concatenate([event_flat, track_flat, photon_flat], axis=1)
@@ -184,11 +185,11 @@ def process(input_file, output_file, dndx=False, getpid=False,
     perm = np.random.permutation(len(X))
     X, y = X[perm], y[perm]
 
-    # ── Build ordered feature name list ─────────────────────────────────────
+    # ── Build ordered feature name list ───────────────────────────────────────
     feature_names = list(EVENT_FEATURES)
-    for i in range(MAX_NTRACKS):
+    for i in range(max_ntracks):
         feature_names += [f"{f}_{i}" for f in trk_feats]
-    for i in range(MAX_NPHOTONS):
+    for i in range(max_nphotons):
         feature_names += [f"{f}_{i}" for f in PHOTON_FEATURES]
 
     # ── Save to HDF5 ────────────────────────────────────────────────────────
@@ -207,8 +208,8 @@ def process(input_file, output_file, dndx=False, getpid=False,
         hf.attrs["n_event_features"]  = len(EVENT_FEATURES)
         hf.attrs["n_track_features"]  = len(trk_feats)
         hf.attrs["n_photon_features"] = len(PHOTON_FEATURES)
-        hf.attrs["max_ntracks"]       = MAX_NTRACKS
-        hf.attrs["max_nphotons"]      = MAX_NPHOTONS
+        hf.attrs["max_ntracks"]       = max_ntracks
+        hf.attrs["max_nphotons"]      = max_nphotons
         hf.attrs["event_features"]    = EVENT_FEATURES
         hf.attrs["track_features"]    = trk_feats 
         hf.attrs["photon_features"]   = PHOTON_FEATURES
@@ -242,6 +243,10 @@ if __name__ == "__main__":
                         help="Number of events to include in the fixture")
     parser.add_argument("--max-events", type=int, default=None, metavar="N",
                         help="Stop after reading this many events (useful for testing)")
+    parser.add_argument("--max-ntracks", type=int, default=MAX_NTRACKS, metavar="N",
+                        help="Pad/truncate tracks to this length")
+    parser.add_argument("--max-nphotons", type=int, default=MAX_NPHOTONS, metavar="N",
+                        help="Pad/truncate photons to this length")
     args = parser.parse_args()
 
     if args.save_dndx:
@@ -251,4 +256,5 @@ if __name__ == "__main__":
 
     process(args.input, args.output, args.save_dndx, args.get_pid,
             fixture_path=args.fixture, fixture_events=args.fixture_events,
-            max_events=args.max_events)
+            max_events=args.max_events,
+            max_ntracks=args.max_ntracks, max_nphotons=args.max_nphotons)

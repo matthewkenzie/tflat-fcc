@@ -31,9 +31,11 @@ CONFIG_PATH      = os.path.join(os.path.dirname(__file__), "unit_test_config.yam
 FULL_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 # Integration test uses the full ROOT file so we can request 5K-10K events
 ROOT_FILE        = os.path.join(os.path.dirname(__file__), "FCCee_FT_tuples", "Bd_full.root")
-MAX_EVENTS  = 8_000  # events to read from the ROOT file
-N_EVENTS    = 256    # synthetic events for unit tests
-N_FIXTURE   = 512    # events subsampled into the shape-check fixture
+MAX_EVENTS      = 8_000  # events to read from the ROOT file
+INTEG_MAX_TRK   = 15     # pad/truncate tracks  for the integration test
+INTEG_MAX_PHO   = 15     # pad/truncate photons for the integration test
+N_EVENTS        = 256    # synthetic events for unit tests
+N_FIXTURE       = 512    # events subsampled into the shape-check fixture
 # Expected feature width from unit_test_config.yaml (dndx=False default)
 # 4 event + 30*11 track + 35*3 photon
 _p = load_config(CONFIG_PATH)["parameters"]
@@ -151,13 +153,18 @@ def _train_cfg():
 def _slow_train_cfg():
     """Return a realistic training config targeting ~5 min on Bd_full.root.
 
-    Uses the full config.yaml (embedding_dims=128) on MAX_EVENTS=8000 events.
-    At ~68 s/epoch (115 batches of 64 on 7360 train events) this runs for
-    roughly 4 × 68 s ≈ 4.5 min of training (plus ~60 s for process.py).
+    Uses the full config.yaml (embedding_dims=128) on MAX_EVENTS=8000 events
+    with INTEG_MAX_TRK=15 tracks and INTEG_MAX_PHO=15 photons.
+    Smaller sequences (31 elements vs 66) give ~48 s/epoch measured;
+    5 × 48 s ≈ 240 s training + ~60 s process.py + 5 s plots ≈ 5 min total.
+    (4 + 15×11 + 15×3 = 214 features)
     """
     cfg = load_config(FULL_CONFIG_PATH)
-    cfg["epochs"]   = 4
-    cfg["patience"] = 4
+    cfg["epochs"]   = 5
+    cfg["patience"] = 5
+    # Match the reduced sequence lengths used in process()
+    cfg["parameters"]["num_trk"]    = INTEG_MAX_TRK
+    cfg["parameters"]["num_photon"] = INTEG_MAX_PHO
     return cfg
 
 
@@ -183,15 +190,22 @@ def test_full_pipeline(tmp_path):
     # ── Step 1: process ROOT → HDF5 + fixture ─────────────────────────────
     process(ROOT_FILE, h5_out,
             fixture_path=fixture_path, fixture_events=N_FIXTURE,
-            max_events=MAX_EVENTS)
+            max_events=MAX_EVENTS,
+            max_ntracks=INTEG_MAX_TRK, max_nphotons=INTEG_MAX_PHO)
+
+    # Feature count depends on integration-test sequence lengths, not unit-test config
+    integ_cfg = _slow_train_cfg()["parameters"]
+    integ_n_features = (integ_cfg["num_evt"] * integ_cfg["num_evt_features"]
+                        + integ_cfg["num_trk"]    * integ_cfg["num_trk_features"]
+                        + integ_cfg["num_photon"] * integ_cfg["num_photon_features"])
 
     assert os.path.isfile(h5_out),   "HDF5 output not created"
     assert os.path.isfile(root_out), "ROOT mirror not created"
     with h5py.File(h5_out) as hf:
         n_events, n_features = hf["X"].shape
         assert n_events  > 0,                    "HDF5 has no events"
-        assert n_features == EXPECTED_FEATURES,  \
-            f"feature count mismatch: got {n_features}, expected {EXPECTED_FEATURES}"
+        assert n_features == integ_n_features,  \
+            f"feature count mismatch: got {n_features}, expected {integ_n_features}"
         assert set(np.unique(hf["y"][:])).issubset({-1, 0, 1}), \
             "unexpected y values (expected B-meson qTag in {-1, 0, 1})"
 
@@ -200,7 +214,7 @@ def test_full_pipeline(tmp_path):
     with h5py.File(fixture_path) as hf:
         fx_events, fx_features = hf["X"].shape
         assert fx_events   == min(N_FIXTURE, n_events), "fixture event count wrong"
-        assert fx_features == EXPECTED_FEATURES,        "fixture feature count wrong"
+        assert fx_features == integ_n_features,         "fixture feature count wrong"
 
     # ── Step 3: train on full processed data ──────────────────────────
     cfg        = _slow_train_cfg()
