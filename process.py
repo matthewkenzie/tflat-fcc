@@ -1,8 +1,15 @@
+import os
+import sys
+import importlib.util
 import uproot
 import awkward as ak
 import numpy as np
 import h5py
 import argparse
+
+# Path to the fccee-tracker-pid package (sibling directory)
+PID_PACKAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "fccee-tracker-pid")
 
 # ── Maximum number of objects per event (pad/truncate to this) ──────────────
 MAX_NTRACKS = 30
@@ -26,6 +33,59 @@ PROTON_ID = 2212
 
 GLOB_VARS = ["EVT_p", "EVT_e", "EVT_nCharged", "EVT_nNeutral"]
 
+def _load_pid_tools():
+    """Import helper functions from fccee-tracker-pid without triggering its CLI entry point.
+
+    get_pid.py runs argparse + assertions at module level, so we load it via
+    importlib and catch the SystemExit/AssertionError that fires before the
+    tree-reading code, by which point the three functions are already defined.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "pid_tools", os.path.join(PID_PACKAGE, "get_pid.py"))
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except (SystemExit, AssertionError):
+        pass  # functions are defined before argparse/assertions run
+    return mod.read_classifiers, mod.make_prediction, mod.get_features
+
+
+def get_pid(tracks, absid, detector="IDEA", tof_val=-1.0, dndx_val=0.8):
+    """Apply BDT-based PID from fccee-tracker-pid for pi/K/p; truth-match e/mu."""
+    read_classifiers, make_prediction, get_features = _load_pid_tools()
+    usededx = "nodedx"
+
+    # Model paths inside the package are relative — change CWD temporarily
+    orig_dir = os.getcwd()
+    os.chdir(PID_PACKAGE)
+    model_cache = read_classifiers(detector, tof_val, dndx_val, usededx)
+    os.chdir(orig_dir)
+
+    # Flatten jagged track arrays to 1D for the BDT
+    counts = ak.num(tracks["track_p"])
+    flat_data = {
+        "track_p":    ak.to_numpy(ak.flatten(tracks["track_p"])).astype(np.float64),
+        "track_dndx": ak.to_numpy(ak.flatten(tracks["track_dndx"])).astype(np.float64),
+    }
+    features = get_features(
+        flat_data,
+        speed_var=None, flight_var=None, tof_var=None,
+        dndx_var="track_dndx", dedx_var=None,
+        momentum_var="track_p", detector=detector,
+    )
+
+    # Predict probabilities for pi (211), K (321), p (2212)
+    pdgs = [211, 321, 2212]
+    predictions = make_prediction(model_cache, features, tof_val, dndx_val, usededx, pdgs)
+
+    # Unflatten predictions back to jagged and assign to track record
+    tracks["track_prob_pi"] = ak.unflatten(predictions[0].astype(np.float32), counts)
+    tracks["track_prob_K"]  = ak.unflatten(predictions[1].astype(np.float32), counts)
+    tracks["track_prob_p"]  = ak.unflatten(predictions[2].astype(np.float32), counts)
+    # e/mu are not predicted by this tool — fall back to truth matching
+    tracks["track_prob_e"]  = ak.where(absid == ELECTRON_ID, 1.0, 0.0)
+    tracks["track_prob_mu"] = ak.where(absid == MUON_ID,     1.0, 0.0)
+    return tracks
 
 def pad_and_flatten(jagged, features, max_n):
     """
@@ -48,7 +108,7 @@ def pad_and_flatten(jagged, features, max_n):
     return np.stack(columns, axis=-1).reshape(len(jagged), -1)
 
 
-def process(input_file, output_file):
+def process(input_file, output_file, dndx=False, getpid=False):
     """Read raw ROOT, process, pad, flatten, and save to HDF5."""
 
     tree = uproot.open(input_file + ":events")
@@ -78,24 +138,35 @@ def process(input_file, output_file):
         "track_z0":   trk["Rec_track_z0"][track_mask],
         "track_dndx": trk["Rec_track_dNdx"][track_mask],
     })
-    tracks["track_prob_e"]  = ak.where(absid == ELECTRON_ID, 1, 0)
-    tracks["track_prob_mu"] = ak.where(absid == MUON_ID, 1, 0)
-    tracks["track_prob_pi"] = ak.where(absid == PION_ID, 1, 0)
-    tracks["track_prob_K"]  = ak.where(absid == KAON_ID, 1, 0)
-    tracks["track_prob_p"]  = ak.where(absid == PROTON_ID, 1, 0)
+
+    if getpid:
+        tracks = get_pid(tracks, absid)
+    else:
+        tracks["track_prob_e"]  = ak.where(absid == ELECTRON_ID, 1, 0)
+        tracks["track_prob_mu"] = ak.where(absid == MUON_ID, 1, 0)
+        tracks["track_prob_pi"] = ak.where(absid == PION_ID, 1, 0)
+        tracks["track_prob_K"]  = ak.where(absid == KAON_ID, 1, 0)
+        tracks["track_prob_p"]  = ak.where(absid == PROTON_ID, 1, 0)
     tracks = tracks[ak.argsort(tracks["track_p"], axis=1, ascending=False)]
+    
+
+
     # ── Event-level features ────────────────────────────────────────────────
     event = tree.arrays(GLOB_VARS)
     event_flat = np.column_stack([
         ak.to_numpy(event[v]).astype(np.float32) for v in GLOB_VARS
     ])
 
-    # ── Target (random placeholder for now) ─────────────────────────────────
+    # ── Target  ─────────────────────────────────────────────────────────────
     target = tree.arrays(["MC_B_qTag"])
     target_flat = target["MC_B_qTag"].to_numpy().astype(np.int32)
 
-    # ── Pad and flatten variable-length arrays ──────────────────────────────
-    track_flat  = pad_and_flatten(tracks,  TRACK_FEATURES,  MAX_NTRACKS)
+    # ── Pad and flatten variable-length arrays ────────────────────────────────────
+    if not dndx:
+        trk_feats = [t for t in TRACK_FEATURES if t != "track_dndx"]
+    else:
+        trk_feats = TRACK_FEATURES
+    track_flat  = pad_and_flatten(tracks,  trk_feats,  MAX_NTRACKS)
     photon_flat = pad_and_flatten(photons, PHOTON_FEATURES, MAX_NPHOTONS)
 
     # ── Concatenate: event | tracks | photons ───────────────────────────────
@@ -109,7 +180,7 @@ def process(input_file, output_file):
     # ── Build ordered feature name list ─────────────────────────────────────
     feature_names = list(EVENT_FEATURES)
     for i in range(MAX_NTRACKS):
-        feature_names += [f"{f}_{i}" for f in TRACK_FEATURES]
+        feature_names += [f"{f}_{i}" for f in trk_feats]
     for i in range(MAX_NPHOTONS):
         feature_names += [f"{f}_{i}" for f in PHOTON_FEATURES]
 
@@ -127,12 +198,12 @@ def process(input_file, output_file):
         hf.attrs["n_events"]          = len(X)
         hf.attrs["n_features"]        = X.shape[1]
         hf.attrs["n_event_features"]  = len(EVENT_FEATURES)
-        hf.attrs["n_track_features"]  = len(TRACK_FEATURES)
+        hf.attrs["n_track_features"]  = len(trk_feats)
         hf.attrs["n_photon_features"] = len(PHOTON_FEATURES)
         hf.attrs["max_ntracks"]       = MAX_NTRACKS
         hf.attrs["max_nphotons"]      = MAX_NPHOTONS
         hf.attrs["event_features"]    = EVENT_FEATURES
-        hf.attrs["track_features"]    = TRACK_FEATURES
+        hf.attrs["track_features"]    = trk_feats 
         hf.attrs["photon_features"]   = PHOTON_FEATURES
         hf.attrs["feature_names"]     = feature_names
     
@@ -140,7 +211,7 @@ def process(input_file, output_file):
     branches = {name: X[:, i] for i, name in enumerate(feature_names)}
     branches["qTag"] = y
     with uproot.recreate(output_file.replace(".h5",".root")) as outf:
-        outf["events"] = branches
+        outf["training"] = branches
 
     print(f"Saved {len(X)} events × {X.shape[1]} features to {output_file}")
 
@@ -152,6 +223,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("-i", "--input", default="test_FT_tuple.root", help="Input tuple")
     parser.add_argument("-o", "--output", default="training_data.h5", help="Output training file")
+    parser.add_argument("-s", "--save-dndx", default=False, action="store_true", help="Save dNdx per track")
+    parser.add_argument("-p", "--get-pid", default=False, action="store_true", help="Look for PID tool and gen PID vars")
     args = parser.parse_args()
 
-    process(args.input, args.output)
+    if args.save_dndx:
+        args.output = args.output.replace(".h5", "_dNdx.h5")
+    if args.get_pid:
+        args.output = args.output.replace(".h5","_pid.h5")
+
+    process(args.input, args.output, args.save_dndx, args.get_pid)
