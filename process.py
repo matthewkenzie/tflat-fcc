@@ -2,6 +2,7 @@ import os
 import sys
 import importlib.util
 import uproot
+from make_fixture import make_fixture
 import awkward as ak
 import numpy as np
 import h5py
@@ -112,7 +113,8 @@ def pad_and_flatten(jagged, features, max_n):
     return np.stack(columns, axis=-1).reshape(len(jagged), -1)
 
 
-def process(input_file, output_file, dndx=False, getpid=False):
+def process(input_file, output_file, dndx=False, getpid=False,
+            fixture_path=None, fixture_events=512):
     """Read raw ROOT, process, pad, flatten, and save to HDF5."""
 
     tree = uproot.open(input_file + ":events")
@@ -219,6 +221,10 @@ def process(input_file, output_file, dndx=False, getpid=False):
 
     print(f"Saved {len(X)} events × {X.shape[1]} features to {output_file}")
 
+    # ── Optionally write a small fixture for unit / integration tests ────────
+    if fixture_path:
+        make_fixture(output_file, fixture_path, fixture_events)
+
 
 if __name__ == "__main__":
 
@@ -229,6 +235,10 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output", default="training_data.h5", help="Output training file")
     parser.add_argument("-s", "--save-dndx", default=False, action="store_true", help="Save dNdx per track")
     parser.add_argument("-p", "--get-pid", default=False, action="store_true", help="Look for PID tool and gen PID vars")
+    parser.add_argument("--fixture", default=None, metavar="PATH",
+                        help="Also write a small test fixture HDF5 alongside the main output")
+    parser.add_argument("--fixture-events", type=int, default=512, metavar="N",
+                        help="Number of events to include in the fixture")
     args = parser.parse_args()
 
     if args.save_dndx:
@@ -236,4 +246,5 @@ if __name__ == "__main__":
     if args.get_pid:
         args.output = args.output.replace(".h5","_pid.h5")
 
-    process(args.input, args.output, args.save_dndx, args.get_pid)
+    process(args.input, args.output, args.save_dndx, args.get_pid,
+            fixture_path=args.fixture, fixture_events=args.fixture_events)

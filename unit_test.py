@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Run unit tests only:        conda run -n tflat pytest unit_test.py -v
+# Run integration test only:  conda run -n tflat pytest unit_test.py -m integration -v
+# Run everything:             conda run -n tflat pytest unit_test.py -v --run-integration
 """
 Smoke test for the TFlat training pipeline.
 
@@ -20,9 +23,17 @@ from fitter import fit
 from utils import load_config
 from model import get_tflat_model
 
-# ── Constants ────────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "unit_test_config.yaml")
+ROOT_FILE   = os.path.join(os.path.dirname(__file__), "FCCee_FT_tuples", "Bd_test.root")
 N_EVENTS    = 256   # enough for a train/val split with batch_size=64
+N_FIXTURE   = 256   # events subsampled for the integration test
+# Expected feature width from unit_test_config.yaml (dndx=False default)
+# 4 event + 30*11 track + 35*3 photon
+_p = load_config(CONFIG_PATH)["parameters"]
+EXPECTED_FEATURES = (_p["num_evt"] * _p["num_evt_features"]
+                     + _p["num_trk"] * _p["num_trk_features"]
+                     + _p["num_photon"] * _p["num_photon_features"])
 
 
 # ── Fixture ──────────────────────────────────────────────────────────────────
@@ -118,3 +129,79 @@ def test_model_output_shape(synthetic_h5):
     preds = model.predict(X_batch, verbose=0)
     assert preds.shape == (32, 1), f"unexpected output shape {preds.shape}"
     assert np.all(preds >= 0) and np.all(preds <= 1), "sigmoid output out of [0, 1]"
+
+
+# ── Integration test ─────────────────────────────────────────────────────────
+def _train_cfg():
+    """Return a fast training config suitable for integration tests."""
+    cfg = load_config(CONFIG_PATH)
+    cfg["epochs"]               = 2
+    cfg["batch_size"]           = 32
+    cfg["chunk_size"]           = 128
+    cfg["train_valid_fraction"] = 0.8
+    return cfg
+
+
+@pytest.mark.integration
+def test_full_pipeline(tmp_path):
+    """
+    End-to-end integration test:
+      1. process()  : ROOT → HDF5  (checks shape, y values, ROOT mirror)
+      2. make_fixture inside process() → fixture HDF5  (checks n_events, n_features)
+      3. fit()      : train on fixture  (checks finite losses + checkpoint)
+    Skipped automatically if FCCee_FT_tuples/Bd_test.root is not present.
+    """
+    if not os.path.exists(ROOT_FILE):
+        pytest.skip(f"ROOT file not found: {ROOT_FILE}")
+
+    from process      import process
+    from make_fixture import make_fixture
+
+    h5_out       = str(tmp_path / "training.h5")
+    fixture_path = str(tmp_path / "fixture.h5")
+    root_out     = h5_out.replace(".h5", ".root")
+
+    # ── Step 1: process ROOT → HDF5 + fixture ─────────────────────────────
+    process(ROOT_FILE, h5_out, fixture_path=fixture_path, fixture_events=N_FIXTURE)
+
+    assert os.path.isfile(h5_out),   "HDF5 output not created"
+    assert os.path.isfile(root_out), "ROOT mirror not created"
+    with h5py.File(h5_out) as hf:
+        n_events, n_features = hf["X"].shape
+        assert n_events  > 0,                    "HDF5 has no events"
+        assert n_features == EXPECTED_FEATURES,  \
+            f"feature count mismatch: got {n_features}, expected {EXPECTED_FEATURES}"
+        assert set(np.unique(hf["y"][:])).issubset({-1, 0, 1}), \
+            "unexpected y values (expected B-meson qTag in {-1, 0, 1})"
+
+    # ── Step 2: fixture ───────────────────────────────────────────────
+    assert os.path.isfile(fixture_path), "fixture HDF5 not created"
+    with h5py.File(fixture_path) as hf:
+        fx_events, fx_features = hf["X"].shape
+        assert fx_events   == min(N_FIXTURE, n_events), "fixture event count wrong"
+        assert fx_features == EXPECTED_FEATURES,        "fixture feature count wrong"
+
+    # ── Step 3: train on fixture ──────────────────────────────────────
+    cfg        = _train_cfg()
+    checkpoint = str(tmp_path / "checkpoint.model.keras")
+
+    model = get_tflat_model(parameters=cfg["parameters"])
+    model.compile(
+        optimizer=keras.optimizers.AdamW(
+            learning_rate=keras.optimizers.schedules.CosineDecay(
+                initial_learning_rate=cfg["initial_learning_rate"],
+                decay_steps=cfg["decay_steps"],
+                alpha=cfg["alpha"],
+            ),
+            weight_decay=cfg["weight_decay"],
+        ),
+        loss=keras.losses.binary_crossentropy,
+        metrics=["accuracy", keras.metrics.AUC(), keras.metrics.MeanSquaredError()],
+    )
+
+    history = fit(model, fixture_path, cfg, checkpoint)
+    hist    = history.history
+
+    assert all(np.isfinite(v) for v in hist["loss"]),     "training loss is not finite"
+    assert all(np.isfinite(v) for v in hist["val_loss"]), "val loss is not finite"
+    assert os.path.isfile(checkpoint), "checkpoint was not saved"
