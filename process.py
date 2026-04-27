@@ -11,7 +11,7 @@ MAX_NPHOTONS = 35
 # ── Feature definitions ─────────────────────────────────────────────────────
 EVENT_FEATURES = ["event_p", "event_e", "event_n_charged", "event_n_neutral"]
 TRACK_FEATURES = [
-    "track_q", "track_p", "track_eta", "track_phi", "track_d0", "track_z0",
+    "track_q", "track_p", "track_eta", "track_phi", "track_d0", "track_z0", "track_dndx",
     "track_prob_e", "track_prob_mu", "track_prob_pi", "track_prob_K", "track_prob_p",
 ]
 PHOTON_FEATURES = ["photon_e", "photon_eta", "photon_phi"]
@@ -52,28 +52,31 @@ def process(input_file, output_file):
     """Read raw ROOT, process, pad, flatten, and save to HDF5."""
 
     tree = uproot.open(input_file + ":events")
-    raw_arrays = tree.arrays(filter_name="Rec_*")
-    particles = ak.zip({field: raw_arrays[field] for field in raw_arrays.fields})
+    # Per-particle fields (charged + neutral)
+    par = tree.arrays(["Rec_q", "Rec_p", "Rec_eta", "Rec_phi", "Rec_true_PDG"])
+    # Track-specific fields (same per-particle ordering, 0 for neutrals)
+    trk = tree.arrays(["Rec_track_d0", "Rec_track_z0", "Rec_track_dNdx"])
 
     # ── Photons ─────────────────────────────────────────────────────────────
-    photons = particles[particles["Rec_true_PDG"] == PHOTON_ID]
+    photon_mask = par["Rec_true_PDG"] == PHOTON_ID
     photons = ak.zip({
-        "photon_e":   photons["Rec_p"],
-        "photon_eta": photons["Rec_eta"],
-        "photon_phi": photons["Rec_phi"],
+        "photon_e":   par["Rec_p"][photon_mask],
+        "photon_eta": par["Rec_eta"][photon_mask],
+        "photon_phi": par["Rec_phi"][photon_mask],
     })
     photons = photons[ak.argsort(photons["photon_e"], axis=1, ascending=False)]
 
     # ── Tracks ──────────────────────────────────────────────────────────────
-    tracks = particles[particles["Rec_q"] != 0]
-    absid = abs(tracks["Rec_true_PDG"])
+    track_mask = par["Rec_q"] != 0
+    absid = abs(par["Rec_true_PDG"][track_mask])
     tracks = ak.zip({
-        "track_q":   tracks["Rec_q"],
-        "track_p":   tracks["Rec_p"],
-        "track_eta": tracks["Rec_eta"],
-        "track_phi": tracks["Rec_phi"],
-        "track_d0":  tracks["Rec_track_d0"],
-        "track_z0":  tracks["Rec_track_z0"],
+        "track_q":    par["Rec_q"][track_mask],
+        "track_p":    par["Rec_p"][track_mask],
+        "track_eta":  par["Rec_eta"][track_mask],
+        "track_phi":  par["Rec_phi"][track_mask],
+        "track_d0":   trk["Rec_track_d0"][track_mask],
+        "track_z0":   trk["Rec_track_z0"][track_mask],
+        "track_dndx": trk["Rec_track_dNdx"][track_mask],
     })
     tracks["track_prob_e"]  = ak.where(absid == ELECTRON_ID, 1, 0)
     tracks["track_prob_mu"] = ak.where(absid == MUON_ID, 1, 0)
@@ -81,7 +84,6 @@ def process(input_file, output_file):
     tracks["track_prob_K"]  = ak.where(absid == KAON_ID, 1, 0)
     tracks["track_prob_p"]  = ak.where(absid == PROTON_ID, 1, 0)
     tracks = tracks[ak.argsort(tracks["track_p"], axis=1, ascending=False)]
-
     # ── Event-level features ────────────────────────────────────────────────
     event = tree.arrays(GLOB_VARS)
     event_flat = np.column_stack([
@@ -89,7 +91,8 @@ def process(input_file, output_file):
     ])
 
     # ── Target (random placeholder for now) ─────────────────────────────────
-    target = np.random.choice([0, 1], size=len(event)).astype(np.float32)
+    target = tree.arrays(["MC_B_qTag"])
+    target_flat = target["MC_B_qTag"].to_numpy().astype(np.int32)
 
     # ── Pad and flatten variable-length arrays ──────────────────────────────
     track_flat  = pad_and_flatten(tracks,  TRACK_FEATURES,  MAX_NTRACKS)
@@ -97,11 +100,18 @@ def process(input_file, output_file):
 
     # ── Concatenate: event | tracks | photons ───────────────────────────────
     X = np.concatenate([event_flat, track_flat, photon_flat], axis=1)
-    y = target
+    y = target_flat
 
     # ── Shuffle ─────────────────────────────────────────────────────────────
     perm = np.random.permutation(len(X))
     X, y = X[perm], y[perm]
+
+    # ── Build ordered feature name list ─────────────────────────────────────
+    feature_names = list(EVENT_FEATURES)
+    for i in range(MAX_NTRACKS):
+        feature_names += [f"{f}_{i}" for f in TRACK_FEATURES]
+    for i in range(MAX_NPHOTONS):
+        feature_names += [f"{f}_{i}" for f in PHOTON_FEATURES]
 
     # ── Save to HDF5 ────────────────────────────────────────────────────────
     chunk_rows = min(10240, len(X))
@@ -112,12 +122,6 @@ def process(input_file, output_file):
         hf.create_dataset("y", data=y,
                           chunks=(chunk_rows,),
                           compression="gzip", compression_opts=4)
-        # Build the full ordered list of column names
-        feature_names = list(EVENT_FEATURES)
-        for i in range(MAX_NTRACKS):
-            feature_names += [f"{f}_{i}" for f in TRACK_FEATURES]
-        for i in range(MAX_NPHOTONS):
-            feature_names += [f"{f}_{i}" for f in PHOTON_FEATURES]
 
         # Metadata so the model knows the feature layout
         hf.attrs["n_events"]          = len(X)
@@ -131,6 +135,12 @@ def process(input_file, output_file):
         hf.attrs["track_features"]    = TRACK_FEATURES
         hf.attrs["photon_features"]   = PHOTON_FEATURES
         hf.attrs["feature_names"]     = feature_names
+    
+    # ── Save to root ────────────────────────────────────────────────────────
+    branches = {name: X[:, i] for i, name in enumerate(feature_names)}
+    branches["qTag"] = y
+    with uproot.recreate(output_file.replace(".h5",".root")) as outf:
+        outf["events"] = branches
 
     print(f"Saved {len(X)} events × {X.shape[1]} features to {output_file}")
 
