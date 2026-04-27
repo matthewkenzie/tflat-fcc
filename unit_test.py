@@ -27,8 +27,9 @@ from utils import load_config
 from model import get_tflat_model
 
 # ── Constants ─────────────────────────────────────────────────────────────
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "unit_test_config.yaml")
-ROOT_FILE   = os.path.join(os.path.dirname(__file__), "FCCee_FT_tuples", "Bd_test.root")
+CONFIG_PATH      = os.path.join(os.path.dirname(__file__), "unit_test_config.yaml")
+FULL_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+ROOT_FILE        = os.path.join(os.path.dirname(__file__), "FCCee_FT_tuples", "Bd_test.root")
 N_EVENTS    = 256   # enough for a train/val split with batch_size=64
 N_FIXTURE   = 256   # events subsampled for the integration test
 # Expected feature width from unit_test_config.yaml (dndx=False default)
@@ -136,12 +137,25 @@ def test_model_output_shape(synthetic_h5):
 
 # ── Integration test ─────────────────────────────────────────────────────────
 def _train_cfg():
-    """Return a fast training config suitable for integration tests."""
+    """Return a fast training config for smoke tests (unit tests)."""
     cfg = load_config(CONFIG_PATH)
     cfg["epochs"]               = 2
     cfg["batch_size"]           = 32
     cfg["chunk_size"]           = 128
-    cfg["train_valid_fraction"] = 0.8
+    cfg["train_valid_fraction"] = 0.8   # 256×0.2 = 51 val events > batch_size
+    return cfg
+
+
+def _slow_train_cfg():
+    """Return a realistic training config targeting ~5 min on Bd_test.root.
+
+    Uses the full config.yaml (embedding_dims=128) on all ~978 processed events.
+    At ~13 s/epoch (14 batches of 64 on 900 train events) this runs for
+    roughly 20 × 13 s ≈ 4.3 min of pure training.
+    """
+    cfg = load_config(FULL_CONFIG_PATH)
+    cfg["epochs"]   = 20
+    cfg["patience"] = 10   # allow early stopping if it genuinely converges
     return cfg
 
 
@@ -184,8 +198,8 @@ def test_full_pipeline(tmp_path):
         assert fx_events   == min(N_FIXTURE, n_events), "fixture event count wrong"
         assert fx_features == EXPECTED_FEATURES,        "fixture feature count wrong"
 
-    # ── Step 3: train on fixture ──────────────────────────────────────
-    cfg        = _train_cfg()
+    # ── Step 3: train on full processed data ──────────────────────────
+    cfg        = _slow_train_cfg()
     checkpoint = str(tmp_path / "checkpoint.model.keras")
 
     model = get_tflat_model(parameters=cfg["parameters"])
@@ -202,7 +216,7 @@ def test_full_pipeline(tmp_path):
         metrics=["accuracy", keras.metrics.AUC(), keras.metrics.MeanSquaredError()],
     )
 
-    history = fit(model, fixture_path, cfg, checkpoint)
+    history = fit(model, h5_out, cfg, checkpoint)
     hist    = history.history
 
     assert all(np.isfinite(v) for v in hist["loss"]),     "training loss is not finite"
@@ -221,7 +235,7 @@ def test_full_pipeline(tmp_path):
     from plot_output import plot_output
     output_png   = str(tmp_path / "output.png")
     metrics_json = output_png.rsplit(".", 1)[0] + ".json"
-    plot_output(checkpoint, fixture_path, CONFIG_PATH, output_png)
+    plot_output(checkpoint, h5_out, FULL_CONFIG_PATH, output_png)
     assert os.path.isfile(output_png),   "plot_output did not produce PNG"
     assert os.path.isfile(metrics_json), "plot_output did not produce metrics JSON"
     with open(metrics_json) as f:
