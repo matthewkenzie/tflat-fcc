@@ -13,10 +13,13 @@ Run with:
     conda run -n tflat pytest unit_test.py -v
 """
 
+import json
 import os
 import numpy as np
 import h5py
 import pytest
+import matplotlib
+matplotlib.use("Agg")  # headless-safe before any pyplot import
 import keras
 
 from fitter import fit
@@ -205,3 +208,26 @@ def test_full_pipeline(tmp_path):
     assert all(np.isfinite(v) for v in hist["loss"]),     "training loss is not finite"
     assert all(np.isfinite(v) for v in hist["val_loss"]), "val loss is not finite"
     assert os.path.isfile(checkpoint), "checkpoint was not saved"
+
+    # ── Step 4: plot_history ────────────────────────────────────
+    from plot_history import plot_history
+    history_json = checkpoint.replace(".model.keras", ".history.json")
+    history_png  = str(tmp_path / "history.png")
+    assert os.path.isfile(history_json), "fitter did not save history JSON"
+    plot_history(history_json, history_png)
+    assert os.path.isfile(history_png), "plot_history did not produce PNG"
+
+    # ── Step 5: plot_output ────────────────────────────────────
+    from plot_output import plot_output
+    output_png   = str(tmp_path / "output.png")
+    metrics_json = output_png.rsplit(".", 1)[0] + ".json"
+    plot_output(checkpoint, fixture_path, CONFIG_PATH, output_png)
+    assert os.path.isfile(output_png),   "plot_output did not produce PNG"
+    assert os.path.isfile(metrics_json), "plot_output did not produce metrics JSON"
+    with open(metrics_json) as f:
+        metrics = json.load(f)
+    assert {"train", "val"} <= metrics.keys(), "metrics JSON missing train/val keys"
+    for split in ("train", "val"):
+        for key in ("w", "D", "P"):
+            assert np.isfinite(metrics[split][key]), \
+                f"metrics[{split!r}][{key!r}] is not finite"
