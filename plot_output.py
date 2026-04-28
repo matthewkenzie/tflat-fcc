@@ -20,7 +20,7 @@ def plot_output(model_path, data_path, config_path, output_path=None, n_bins=30)
     import model as _  # noqa: F401 — registers MyConcatenate for deserialization
 
     config = load_config(config_path)
-    train_frac = config.get("train_valid_fraction", 0.9)
+    train_frac = config["training"].get("train_valid_fraction", 0.9)
 
     # Load data and compute train/val split (must match fitter.py)
     with h5py.File(data_path, "r") as hf:

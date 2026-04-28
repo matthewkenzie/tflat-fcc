@@ -73,9 +73,9 @@ class HDF5BatchGenerator(keras.utils.PyDataset):
 
 def fit(model, h5_path, config, checkpoint_filepath):
     """Train *model* on the HDF5 dataset at *h5_path*."""
-    batch_size = config["batch_size"]
-    chunk_size = config["chunk_size"]
-    train_frac = config.get("train_valid_fraction", 0.9)
+    batch_size = config["training"]["batch_size"]
+    chunk_size = config["training"]["chunk_size"]
+    train_frac = config["training"].get("train_valid_fraction", 0.9)
 
     with h5py.File(h5_path, "r") as hf:
         n_total = hf["X"].shape[0]
@@ -90,7 +90,7 @@ def fit(model, h5_path, config, checkpoint_filepath):
 
     callbacks = [
         keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=config["patience"],
+            monitor="val_loss", patience=config["training"]["patience"],
             restore_best_weights=True, verbose=1,
         ),
         keras.callbacks.ModelCheckpoint(
@@ -104,7 +104,7 @@ def fit(model, h5_path, config, checkpoint_filepath):
         validation_data=val_ds,
         steps_per_epoch=len(train_ds),
         validation_steps=len(val_ds),
-        epochs=config["epochs"],
+        epochs=config["training"]["epochs"],
         callbacks=callbacks,
         verbose=2,
     )
