@@ -72,15 +72,14 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
    mkdir training_files
    
    # Run Bd jobs
-   python process.py -i Bd_full.root -o training_files/Bd_training.h5
-   python process.py -i Bd_full.root -o training_files/Bd_training.h5 -s # adds dN/dx var to feature set
-   python process.py -i Bd_full.root -o training_files/Bd_training.h5 -p # uses PID tool to get realistic PID vars
+   python process.py -i Bd_full.root -o training_files/Bd_training.h5 -c config.yaml
    
    # Run Bs jobs
-   python process.py -i Bs_full.root -o training_files/Bs_training.h5
-   python process.py -i Bs_full.root -o training_files/Bs_training.h5 -s # adds dN/dx var to feature set
-   python process.py -i Bs_full.root -o training_files/Bs_training.h5 -p # uses PID tool to get realistic PID vars
+   python process.py -i Bs_full.root -o training_files/Bs_training.h5 -c config.yaml
    ```
+
+ - The `config.yaml` file allows you to run different configuration settings
+ - A small test example (rather than the full network and sample) can be run using `test_config.yaml`
 
  - There is some metadata saved in the output training file as well as the training arrays.
 
@@ -89,13 +88,15 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
  - Launch the training with the `trainer.py` script:
 
     ```bash
-    python trainer.py 
+    python trainer.py -i training_files/Bd_training.h5 -c config.yaml
     ```
+
+ - You can again use `test_config.yaml` to run a small test configuration.
 
  - If the training crashes at any point it can be restarted from the latest checkpoint with:
 
     ```bash
-    python trainer.py --warmstart
+    python trainer.py -i training_files/Bd_training.h5 -c config.yaml --warmstart
     ```
 
  - Once the training is done a keras weightfile is produced called `model.keras`
@@ -117,3 +118,18 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
     ```
     
     This will also save the performance metrics in a file called `output.json`
+
+## Running a test workflow 
+
+ - A test workflow can be run based on the configuration laid out in `test_config.yaml`.
+
+ - The workflow is run by `snakemake` using the `Snakefile`. You can run with a few different options:
+
+    ```bash
+    snakemake
+    snakemake --config withpid=True 
+    snakemake --config withpid=True realpid=True
+    snakemake --config withdndx=True
+    ```
+
+ - This will save different outputs in the `runs` directory.

@@ -2,7 +2,6 @@ import os
 import sys
 import importlib.util
 import uproot
-from make_fixture import make_fixture
 import awkward as ak
 import numpy as np
 import h5py
