@@ -8,9 +8,10 @@ import numpy as np
 import h5py
 import argparse
 
+import utils
+
 # Path to the fccee-tracker-pid package (sibling directory)
-PID_PACKAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "..", "fccee-tracker-pid")
+# PID_PACKAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fccee-tracker-pid")
 
 # ── Maximum number of objects per event (pad/truncate to this) ──────────────
 MAX_NTRACKS = 30
@@ -34,15 +35,16 @@ PROTON_ID = 2212
 
 GLOB_VARS = ["EVT_p", "EVT_e", "EVT_nCharged", "EVT_nNeutral"]
 
-def _load_pid_tools():
+def _load_pid_tools(pid_tool_loc):
     """Import helper functions from fccee-tracker-pid without triggering its CLI entry point.
 
     get_pid.py runs argparse + assertions at module level, so we load it via
     importlib and catch the SystemExit/AssertionError that fires before the
     tree-reading code, by which point the three functions are already defined.
     """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), pid_tool_loc)
     spec = importlib.util.spec_from_file_location(
-        "pid_tools", os.path.join(PID_PACKAGE, "get_pid.py"))
+        "pid_tools", os.path.join(path, "get_pid.py"))
     mod = importlib.util.module_from_spec(spec)
     import io
     _old_stderr, sys.stderr = sys.stderr, io.StringIO()
@@ -55,14 +57,16 @@ def _load_pid_tools():
     return mod.read_classifiers, mod.make_prediction, mod.get_features
 
 
-def get_pid(tracks, absid, detector="IDEA", tof_val=-1.0, dndx_val=0.8):
+def get_pid(tracks, absid, pid_tool_loc="fccee-tracker-pid", detector="IDEA", tof_val=-1.0, dndx_val=0.8):
     """Apply BDT-based PID from fccee-tracker-pid for pi/K/p; truth-match e/mu."""
-    read_classifiers, make_prediction, get_features = _load_pid_tools()
+    read_classifiers, make_prediction, get_features = _load_pid_tools(pid_tool_loc)
     usededx = "nodedx"
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), pid_tool_loc)
 
     # Model paths inside the package are relative — change CWD temporarily
     orig_dir = os.getcwd()
-    os.chdir(PID_PACKAGE)
+    os.chdir(path)
     model_cache = read_classifiers(detector, tof_val, dndx_val, usededx)
     os.chdir(orig_dir)
 
@@ -113,10 +117,16 @@ def pad_and_flatten(jagged, features, max_n):
     return np.stack(columns, axis=-1).reshape(len(jagged), -1)
 
 
-def process(input_file, output_file, dndx=False, getpid=False,
-            fixture_path=None, fixture_events=512, max_events=None,
-            max_ntracks=MAX_NTRACKS, max_nphotons=MAX_NPHOTONS):
+def process(input_file, output_file, cfg):
     """Read raw ROOT, process, pad, flatten, and save to HDF5."""
+    
+    dndx = cfg["setup"]["with_dndx"]
+    pid = cfg["setup"]["with_pid"]
+    real_pid = cfg["setup"]["real_pid"]
+
+    max_events = cfg["preprocess"]["max_events"]
+    max_ntracks = cfg["preprocess"]["num_trk"]
+    max_nphotons = cfg["preprocess"]["num_photon"]
 
     tree = uproot.open(input_file + ":events")
     kw   = dict(entry_stop=max_events)   # passed to every tree.arrays() call
@@ -133,6 +143,7 @@ def process(input_file, output_file, dndx=False, getpid=False,
         "photon_phi": par["Rec_phi"][photon_mask],
     })
     photons = photons[ak.argsort(photons["photon_e"], axis=1, ascending=False)]
+    cfg["preprocess"]["num_photon_features"] = len(photons.fields)
 
     # ── Tracks ──────────────────────────────────────────────────────────────
     track_mask = par["Rec_q"] != 0
@@ -147,33 +158,40 @@ def process(input_file, output_file, dndx=False, getpid=False,
         "track_dndx": trk["Rec_track_dNdx"][track_mask],
     })
 
-    if getpid:
-        tracks = get_pid(tracks, absid)
-    else:
-        tracks["track_prob_e"]  = ak.where(absid == ELECTRON_ID, 1, 0)
-        tracks["track_prob_mu"] = ak.where(absid == MUON_ID, 1, 0)
-        tracks["track_prob_pi"] = ak.where(absid == PION_ID, 1, 0)
-        tracks["track_prob_K"]  = ak.where(absid == KAON_ID, 1, 0)
-        tracks["track_prob_p"]  = ak.where(absid == PROTON_ID, 1, 0)
-    tracks = tracks[ak.argsort(tracks["track_p"], axis=1, ascending=False)]
+    if pid:
+        if real_pid:
+            tracks = get_pid(tracks, absid, cfg["setup"]["pid_package_loc"])
+        else:
+            tracks["track_prob_e"]  = ak.where(absid == ELECTRON_ID, 1, 0)
+            tracks["track_prob_mu"] = ak.where(absid == MUON_ID, 1, 0)
+            tracks["track_prob_pi"] = ak.where(absid == PION_ID, 1, 0)
+            tracks["track_prob_K"]  = ak.where(absid == KAON_ID, 1, 0)
+            tracks["track_prob_p"]  = ak.where(absid == PROTON_ID, 1, 0)
     
-
+    tracks = tracks[ak.argsort(tracks["track_p"], axis=1, ascending=False)]
 
     # ── Event-level features ────────────────────────────────────────────────
     event = tree.arrays(GLOB_VARS, **kw)
     event_flat = np.column_stack([
         ak.to_numpy(event[v]).astype(np.float32) for v in GLOB_VARS
     ])
+    cfg["preprocess"]["num_evt_features"] = len(GLOB_VARS)
 
     # ── Target  ─────────────────────────────────────────────────────────────
     target = tree.arrays(["MC_B_qTag"], **kw)
     target_flat = target["MC_B_qTag"].to_numpy().astype(np.int32)
+    # check no untagged
+    assert( len(target_flat[target_flat==0])==0 )
+    # shift to [0, 1]
+    target_flat[target_flat==-1] = 0
 
     # ── Pad and flatten variable-length arrays ────────────────────────────────────
-    if not dndx:
-        trk_feats = [t for t in TRACK_FEATURES if t != "track_dndx"]
-    else:
-        trk_feats = TRACK_FEATURES
+    # Derive from what's actually in the tracks record so pid=False runs
+    # don't try to flatten track_prob_* that were never added.
+    track_field_set = set(tracks.fields)
+    trk_feats = [f for f in TRACK_FEATURES
+                 if f in track_field_set and (dndx or f != "track_dndx")]
+    cfg["preprocess"]["num_trk_features"] = len(trk_feats)
     track_flat  = pad_and_flatten(tracks,  trk_feats,  max_ntracks)
     photon_flat = pad_and_flatten(photons, PHOTON_FEATURES, max_nphotons)
 
@@ -193,7 +211,7 @@ def process(input_file, output_file, dndx=False, getpid=False,
         feature_names += [f"{f}_{i}" for f in PHOTON_FEATURES]
 
     # ── Save to HDF5 ────────────────────────────────────────────────────────
-    chunk_rows = min(10240, len(X))
+    chunk_rows = min(cfg["training"]["chunk_size"], len(X))
     with h5py.File(output_file, "w", track_order=True) as hf:
         hf.create_dataset("X", data=X,
                           chunks=(chunk_rows, X.shape[1]),
@@ -221,40 +239,21 @@ def process(input_file, output_file, dndx=False, getpid=False,
     with uproot.recreate(output_file.replace(".h5",".root")) as outf:
         outf["training"] = branches
 
-    print(f"Saved {len(X)} events × {X.shape[1]} features to {output_file}")
-
-    # ── Optionally write a small fixture for unit / integration tests ────────
-    if fixture_path:
-        make_fixture(output_file, fixture_path, fixture_events)
-
+    print(f'Saved {len(X)} events × {X.shape[1]} features to {output_file} and {output_file.replace(".h5", ".root")}')
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("-i", "--input", default="test_FT_tuple.root", help="Input tuple")
-    parser.add_argument("-o", "--output", default="training_data.h5", help="Output training file")
-    parser.add_argument("-s", "--save-dndx", default=False, action="store_true", help="Save dNdx per track")
-    parser.add_argument("-p", "--get-pid", default=False, action="store_true", help="Look for PID tool and gen PID vars")
-    parser.add_argument("--fixture", default=None, metavar="PATH",
-                        help="Also write a small test fixture HDF5 alongside the main output")
-    parser.add_argument("--fixture-events", type=int, default=512, metavar="N",
-                        help="Number of events to include in the fixture")
-    parser.add_argument("--max-events", type=int, default=None, metavar="N",
-                        help="Stop after reading this many events (useful for testing)")
-    parser.add_argument("--max-ntracks", type=int, default=MAX_NTRACKS, metavar="N",
-                        help="Pad/truncate tracks to this length")
-    parser.add_argument("--max-nphotons", type=int, default=MAX_NPHOTONS, metavar="N",
-                        help="Pad/truncate photons to this length")
+    parser.add_argument("-i", "--input", default="Bd_full.root", help="Input tuple")
+    parser.add_argument("-o", "--output", default="Bd_training.h5", help="Output training file")
+    parser.add_argument("-c", "--config-file", default="config.yaml", help="Path to config YAML")
     args = parser.parse_args()
 
-    if args.save_dndx:
-        args.output = args.output.replace(".h5", "_dNdx.h5")
-    if args.get_pid:
-        args.output = args.output.replace(".h5","_pid.h5")
+    cfg = utils.load_config(args.config_file)
 
-    process(args.input, args.output, args.save_dndx, args.get_pid,
-            fixture_path=args.fixture, fixture_events=args.fixture_events,
-            max_events=args.max_events,
-            max_ntracks=args.max_ntracks, max_nphotons=args.max_nphotons)
+    process(args.input, args.output, cfg)
+    
+    utils.save_config(args.output.replace(".h5", "_cfg.yaml"), cfg)
+
