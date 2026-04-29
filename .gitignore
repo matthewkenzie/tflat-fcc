@@ -5,3 +5,7 @@ output.json
 ckpt/*
 __pycache__
 model.keras
+old/
+.snakemake
+runs/
+training_files/

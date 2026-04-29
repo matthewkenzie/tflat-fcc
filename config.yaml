@@ -1,7 +1,8 @@
 # ── Architecture parameters ──────────────────────────────────────────────────
 # Feature counts must match what process.py produces.
 parameters:
-  clip_value: 4
+  max_events: -1           # how many events to keep in sample
+  clip_value: 4            # remove events outside 4 sigma from mean
   mask_value: 0
   num_trk: 30              # MAX_NTRACKS in process.py
   num_trk_features: 11     # len(TRACK_FEATURES) in process.py
