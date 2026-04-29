@@ -106,7 +106,7 @@ def fit(model, h5_path, config, checkpoint_filepath):
         validation_steps=len(val_ds),
         epochs=config["training"]["epochs"],
         callbacks=callbacks,
-        verbose=2,
+        verbose=1,
     )
 
     # Save history so it can be plotted later
