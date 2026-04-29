@@ -27,7 +27,11 @@ snakemake --cores 1 --config input=FCCee_FT_tuples/Bs_full.root base_cfg=test_co
 """
 
 import os
+import sys
 import yaml
+
+# Python interpreter running snakemake — guaranteed to be the right env
+PYTHON = sys.executable
 
 # ── Option flags (pass via --config flag=True) ───────────────────────────────
 WITH_PID  = bool(config.get("withpid",  False))
@@ -54,6 +58,7 @@ HIST_JSON = f"{RUN_DIR}/checkpoint.history.json"
 MODEL_OUT = f"{RUN_DIR}/model.keras"
 HIST_PNG  = f"{RUN_DIR}/history.png"
 OUT_PNG   = f"{RUN_DIR}/output.png"
+LOG_DIR   = f"{RUN_DIR}/logs"
 
 
 # ── Rules ─────────────────────────────────────────────────────────────────────
@@ -98,8 +103,16 @@ rule process:
     output:
         h5       = H5_OUT,
         proc_cfg = PROC_CFG,
+    log:
+        f"{LOG_DIR}/process.log",
+    benchmark:
+        f"{LOG_DIR}/process.tsv",
+    params:
+        python = PYTHON,
     shell:
-        "python process.py -i {input.root} -o {output.h5} -c {input.cfg}"
+        "{{ echo '=== process.py start: '$(date) &&"
+        " time {params.python} process.py -i {input.root} -o {output.h5} -c {input.cfg} &&"
+        " echo '=== process.py end: '$(date); }} 2>&1 | tee {log}"
 
 
 rule train:
@@ -111,14 +124,20 @@ rule train:
         model = MODEL_OUT,
         hist  = HIST_JSON,
     params:
-        ckpt = CKPT,
+        ckpt   = CKPT,
+        python = PYTHON,
+    log:
+        f"{LOG_DIR}/train.log",
+    benchmark:
+        f"{LOG_DIR}/train.tsv",
     shell:
-        "mkdir -p {RUN_DIR} && "
-        "python trainer.py"
+        "{{ echo '=== trainer.py start: '$(date) &&"
+        " time {params.python} trainer.py"
         " -i {input.h5}"
         " -c {input.cfg}"
         " -C {params.ckpt}"
-        " -m {output.model}"
+        " -m {output.model} &&"
+        " echo '=== trainer.py end: '$(date); }} 2>&1 | tee {log}"
 
 
 rule plot_history:
@@ -127,8 +146,16 @@ rule plot_history:
         HIST_JSON,
     output:
         HIST_PNG,
+    log:
+        f"{LOG_DIR}/plot_history.log",
+    benchmark:
+        f"{LOG_DIR}/plot_history.tsv",
+    params:
+        python = PYTHON,
     shell:
-        "python plot_history.py {input} -o {output}"
+        "{{ echo '=== plot_history.py start: '$(date) &&"
+        " time {params.python} plot_history.py {input} -o {output} &&"
+        " echo '=== plot_history.py end: '$(date); }} 2>&1 | tee {log}"
 
 
 rule plot_output:
@@ -139,9 +166,17 @@ rule plot_output:
         cfg   = PROC_CFG,
     output:
         OUT_PNG,
+    log:
+        f"{LOG_DIR}/plot_output.log",
+    benchmark:
+        f"{LOG_DIR}/plot_output.tsv",
+    params:
+        python = PYTHON,
     shell:
-        "python plot_output.py"
+        "{{ echo '=== plot_output.py start: '$(date) &&"
+        " time {params.python} plot_output.py"
         " --model  {input.model}"
         " --data   {input.data}"
         " --config {input.cfg}"
-        " -o {output}"
+        " -o {output} &&"
+        " echo '=== plot_output.py end: '$(date); }} 2>&1 | tee {log}"
