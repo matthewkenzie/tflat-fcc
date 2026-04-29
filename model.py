@@ -38,7 +38,7 @@ def create_mlp(hidden_units, dropout_rate, activation, normalization_layer, name
     return keras.Sequential(mlp_layers, name=name)
 
 
-def get_tflat_model(parameters):
+def get_tflat_model(config):
     """
     Build the TFlat transformer model.
 
@@ -50,19 +50,19 @@ def get_tflat_model(parameters):
     element sequence, exactly like the original ROE group) so that the
     architecture is unchanged from the original.
     """
-    clip_value = parameters["clip_value"]
-    mask_value = parameters["mask_value"]
-    num_trk = parameters["num_trk"]
-    num_trk_features = parameters["num_trk_features"]
-    num_photon = parameters["num_photon"]
-    num_photon_features = parameters["num_photon_features"]
-    num_evt = parameters["num_evt"]
-    num_evt_features = parameters["num_evt_features"]
-    num_transformer_blocks = parameters["num_transformer_blocks"]
-    num_heads = parameters["num_heads"]
-    embedding_dims = parameters["embedding_dims"]
-    mlp_hidden_units_factors = parameters["mlp_hidden_units_factors"]
-    dropout_rate = parameters["dropout_rate"]
+    clip_value = config["preprocess"]["clip_value"]
+    mask_value = config["preprocess"]["mask_value"]
+    num_trk = config["preprocess"]["num_trk"]
+    num_trk_features = config["preprocess"]["num_trk_features"]
+    num_photon = config["preprocess"]["num_photon"]
+    num_photon_features = config["preprocess"]["num_photon_features"]
+    num_evt = config["preprocess"]["num_evt"]
+    num_evt_features = config["preprocess"]["num_evt_features"]
+    num_transformer_blocks = config["model"]["num_transformer_blocks"]
+    num_heads = config["model"]["num_heads"]
+    embedding_dims = config["model"]["embedding_dims"]
+    mlp_hidden_units_factors = config["model"]["mlp_hidden_units_factors"]
+    dropout_rate = config["model"]["dropout_rate"]
 
     # Compute start columns for event, tracks, photons
     evt_start = 0
@@ -92,7 +92,7 @@ def get_tflat_model(parameters):
     encoded_evt_features = keras.layers.BatchNormalization(name="Embedding_evt_batchnorm")(encoded_evt_features)
     encoded_evt_features = keras.layers.Dense(
         units=embedding_dims, activation=keras.activations.selu,
-        name="Embedding_evt_dense_2")(normed_evt_features)
+        name="Embedding_evt_dense_2")(encoded_evt_features)
     encoded_evt_features = keras.layers.Dropout(dropout_rate, name="Embedding_evt_dropout_2")(encoded_evt_features)
 
     # Preprocess the track features

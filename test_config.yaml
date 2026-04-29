@@ -6,11 +6,11 @@ setup:
   pid_package_loc: /Users/matt/Scratch/fcc/fccee-tracker-pid
 
 preprocess:
-  max_events: 10000        # how many events to keep in sample
+  max_events: 50000        # how many events to keep in sample
   clip_value: 4            # remove events outside 4 sigma from mean
   mask_value: 0
-  num_trk: 15              # max number of tracks 
-  num_photon: 10           # max number of photons 
+  num_trk: 25              # max number of tracks 
+  num_photon: 5            # max number of photons 
   num_evt: 1               # event features treated as a single-element sequence
 
 model:
@@ -23,13 +23,14 @@ model:
   dropout_rate: 0.1
 
 training:
-  weight_decay: 0.01
-  initial_learning_rate: 0.01
-  decay_steps: 200
+  weight_decay: 0.0001          # match production config
+  initial_learning_rate: 0.0001 # 100x lower: lr=0.01 causes gradient chaos
+  decay_steps: 50000            # ~50K*0.75/256/25 = 146 steps/epoch * 25 epochs
+                                # = 3650 total; 50000 keeps lr near-constant
   alpha: 0.1
-  patience: 5
+  patience: 10
   batch_size: 256
   chunk_size: 5120
-  epochs: 10
+  epochs: 25
   train_valid_fraction: 0.75
 
