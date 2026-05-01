@@ -1,6 +1,8 @@
 *.root
 *.h5
 *.png
+*.swp
+*.swo
 output.json
 ckpt/*
 __pycache__
