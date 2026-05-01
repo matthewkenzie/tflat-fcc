@@ -254,5 +254,5 @@ if __name__ == "__main__":
 
     process(args.input, args.output, cfg)
     
-    utils.save_config(args.output.replace(".h5", "_cfg.yaml"), cfg)
+    utils.save_config(args.output.replace(".h5", ".config.yaml"), cfg)
 

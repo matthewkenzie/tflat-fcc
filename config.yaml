@@ -1,5 +1,8 @@
 # ── Configuration  ──────────────────────────────────────────────────
 setup:
+  inpath: FCCee_FT_tuples # /rds/project/rds-bUoO2gzww9Q/fcc/tflat  
+  outpath: runs/gpu # /rds/project/rds-bUoO2gzww9Q/fcc/tflat/runs/gpu
+  variant: Bd
   with_dndx: false
   with_pid: true
   real_pid: false
@@ -12,9 +15,6 @@ preprocess:
   num_trk: 25              # max number of tracks 
   num_photon: 10           # max number of photons 
   num_evt: 1               # event features treated as a single-element sequence
-  num_trk_features: 11
-  num_photon_features: 3
-  num_evt_features: 4
 
 model:
   num_transformer_blocks: 4
@@ -23,7 +23,7 @@ model:
   mlp_hidden_units_factors:
   - 2
   - 1
-  dropout_rate: 0.1
+  dropout_rate: 0.2
 
 training:
   weight_decay: 0.0001          # match production config
@@ -31,7 +31,7 @@ training:
   decay_steps: 2000000          # ~50K*0.75/256/25 = 146 steps/epoch * 25 epochs
                                 # = 3650 total; 50000 keeps lr near-constant
   alpha: 0.1
-  patience: 10
+  patience: 20
   batch_size: 128
   chunk_size: 10240
   epochs: 200

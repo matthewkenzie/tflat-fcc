@@ -172,13 +172,13 @@ def plot_output(model_path, data_path, config_path, output_path=None, n_bins=30)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot network output distributions")
-    parser.add_argument("--model", default="model.keras",
+    parser.add_argument("-m", "--model", default="model.keras",
                         help="Path to saved Keras model")
-    parser.add_argument("--data", default="training_data.h5",
+    parser.add_argument("-d", "--data", default="training_data.h5",
                         help="Path to HDF5 data file")
-    parser.add_argument("--config", default="config.yaml",
+    parser.add_argument("-c", "--config", default="config.yaml",
                         help="Path to config YAML")
-    parser.add_argument("--bins", type=int, default=30,
+    parser.add_argument("-b", "--bins", type=int, default=30,
                         help="Number of histogram bins")
     parser.add_argument("-o", "--output", default=None,
                         help="Save plot to file instead of displaying")
