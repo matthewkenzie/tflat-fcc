@@ -2,10 +2,10 @@
 setup:
   inpath: /rds/project/rds-bUoO2gzww9Q/fcc/tflat # FCCee_FT_tuples #   
   outpath: /rds/project/rds-bUoO2gzww9Q/fcc/tflat/runs/gpu # runs/gpu # 
-  variant: Bd
+  variant: Bs
   with_dndx: false
   with_pid: true
-  real_pid: false
+  real_pid: true
   pid_package_loc: /home/mk652/fcc/fccee-tracker-pid 
 
 preprocess:

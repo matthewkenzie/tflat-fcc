@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 
 import utils
@@ -53,6 +54,7 @@ if os.path.exists(TRAIN_FILE):
 if rerun:
     cmds = ["python", "process.py", "-i", RAW_FILE, "-o", TRAIN_FILE, "-c", CFG_FILE]
     print("RUN PREPROCESSING....")
+    print("    ", " ".join(cmds))
     subprocess.run(cmds)
 
 
@@ -89,6 +91,7 @@ if retrain:
         cmds = ["sbatch", f"{OUT_PATH}/job_script.sh"]
         print("SUBMITTING GPU JOB...")
         subprocess.run(cmds)
+        sys.exit("Check progress on training and rerun this script to make output plots when it finishes")
 
 # 3.) Make plots
 replot = True

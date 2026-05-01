@@ -5,7 +5,7 @@ setup:
   variant: Bd
   with_dndx: false
   with_pid: true
-  real_pid: false
+  real_pid: true
   pid_package_loc: /home/mk652/fcc/fccee-tracker-pid 
 
 preprocess:
