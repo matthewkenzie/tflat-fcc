@@ -1,0 +1,39 @@
+# ── Configuration  ──────────────────────────────────────────────────
+setup:
+  inpath: /rds/project/rds-bUoO2gzww9Q/fcc/tflat # FCCee_FT_tuples #   
+  outpath: /rds/project/rds-bUoO2gzww9Q/fcc/tflat/runs/gpu # runs/gpu # 
+  variant: Bd
+  with_dndx: false
+  with_pid: false
+  real_pid: false
+  pid_package_loc: /home/mk652/fcc/fccee-tracker-pid 
+
+preprocess:
+  max_events: 1000000      # how many events to keep in sample
+  clip_value: 4            # remove events outside 4 sigma from mean
+  mask_value: 0
+  num_trk: 25              # max number of tracks 
+  num_photon: 10           # max number of photons 
+  num_evt: 1               # event features treated as a single-element sequence
+
+model:
+  num_transformer_blocks: 4
+  num_heads: 4
+  embedding_dims: 64
+  mlp_hidden_units_factors:
+  - 2
+  - 1
+  dropout_rate: 0.2
+
+training:
+  weight_decay: 0.0001          # match production config
+  initial_learning_rate: 0.0001 # 100x lower: lr=0.01 causes gradient chaos
+  decay_steps: 2000000          # ~50K*0.75/256/25 = 146 steps/epoch * 25 epochs
+                                # = 3650 total; 50000 keeps lr near-constant
+  alpha: 0.1
+  patience: 20
+  batch_size: 128
+  chunk_size: 10240
+  epochs: 200
+  train_valid_fraction: 0.8
+
