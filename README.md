@@ -83,12 +83,14 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
 
  - There is some metadata saved in the output training file as well as the training arrays.
 
+ - The main files this produces are a `training.tfrecord` and `validation.tfrecord` file (the `.tfrecord` format is optimised for tensorflow training)
+
 2. **Training**
 
  - Launch the training with the `trainer.py` script:
 
     ```bash
-    python trainer.py -i training_files/Bd_training.h5 -c config.yaml
+    python trainer.py -i training_files/Bd_training.tfrecord -c config.yaml
     ```
 
  - You can again use `test_config.yaml` to run a small test configuration.
@@ -96,7 +98,7 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
  - If the training crashes at any point it can be restarted from the latest checkpoint with:
 
     ```bash
-    python trainer.py -i training_files/Bd_training.h5 -c config.yaml --warmstart
+    python trainer.py -i training_files/Bd_training.tfrecord -c config.yaml --warmstart
     ```
 
  - Once the training is done a keras weightfile is produced called `model.keras`
@@ -133,3 +135,21 @@ The time needed to complete a training depends on the specific GPU. For a NVIDIA
     ```
 
  - This will save different outputs in the `runs` directory.
+
+## Running on Cambridge HPC
+
+ - You can run the full workflow on the Cambridge HPC using GPUS with the following
+
+ - Setup environment
+
+    ```bash
+    module purge
+    module load rhel8/slurm rhel8/global
+    module load cuda/12.1 cudnn/8.9_cuda-12.1
+    source ~/rds/rds-kstarkstar/software/environments/tf-fcc-env/bin/activate
+    ```
+ - Run on one of the default configs from the `configs` directory, for example
+
+    ```bash
+    python submit_job.py -c configs/Bd_dndx.yaml
+    ```

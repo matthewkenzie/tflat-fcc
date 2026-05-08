@@ -30,6 +30,7 @@ RAW_FILE = f"{inpath}/{variant}_full.root"
 OUT_PATH = f"{outpath}/{variant}/{subdir}"
 CFG_FILE = args.config
 TRAIN_FILE = f"{OUT_PATH}/training.h5"
+TRAIN_TFFILE = f"{OUT_PATH}/training.tfrecord"
 TRAIN_CFG = f"{OUT_PATH}/training.config.yaml"
 MODEL_FILE = f"{OUT_PATH}/model.keras"
 CKPT_FILE = f"{OUT_PATH}/checkpoint.model.keras"
@@ -44,8 +45,8 @@ if not os.path.exists(OUT_PATH):
 # 1.) Preprocess
 rerun = True
 
-if os.path.exists(TRAIN_FILE):
-    inp = input(f"Training file {TRAIN_FILE} already exists. Do you want to overwrite it?\n")
+if os.path.exists(TRAIN_TFFILE):
+    inp = input(f"Training file {TRAIN_TFFILE} already exists. Do you want to overwrite it?\n")
     if inp in ["y","Y","yes","Yes"]:
         rerun = True
     else:
@@ -82,7 +83,7 @@ if retrain:
             
             f.write(line)
 
-        cmd = f"python trainer.py -i {TRAIN_FILE} -c {TRAIN_CFG} -C {CKPT_FILE} -m {MODEL_FILE}"
+        cmd = f"python trainer.py -i {TRAIN_TFFILE} -c {TRAIN_CFG} -C {CKPT_FILE} -m {MODEL_FILE}"
         f.write(cmd+"\n")
 
     inp = input(f"Job script made at {OUT_PATH}/job_script.sh. Would you like to submit it?\n")
@@ -106,4 +107,4 @@ if os.path.exists(HISTORY_PLOT) and os.path.exists(OUTPUT_PLOT):
 if replot:
     print("MAKING PLOTS...")
     subprocess.run(["python", "plot_history.py", HIST_FILE, "-o", HISTORY_PLOT])
-    subprocess.run(["python", "plot_output.py", "-m", MODEL_FILE, "-d", TRAIN_FILE, "-c", TRAIN_CFG, "-o", OUTPUT_PLOT])
+    subprocess.run(["python", "plot_output.py", "-m", MODEL_FILE, "-d", TRAIN_TFFILE, "-c", TRAIN_CFG, "-o", OUTPUT_PLOT])

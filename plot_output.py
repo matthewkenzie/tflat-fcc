@@ -12,6 +12,7 @@ import json
 import numpy as np
 import h5py
 import matplotlib.pyplot as plt
+from fitter import load_tfrecord_to_memory
 
 
 def plot_output(model_path, data_path, config_path, output_path=None, n_bins=30):
@@ -20,16 +21,21 @@ def plot_output(model_path, data_path, config_path, output_path=None, n_bins=30)
     import model as _  # noqa: F401 — registers MyConcatenate for deserialization
 
     config = load_config(config_path)
-    train_frac = config["training"].get("train_valid_fraction", 0.9)
+    batch_size = config["training"]["batch_size"]
+    n_features = config["preprocess"]["num_trk"] * config["preprocess"]["num_trk_features"] + config["preprocess"]["num_photon"] * config["preprocess"]["num_photon_features"] + config["preprocess"]["num_evt_features"]
 
     # Load data and compute train/val split (must match fitter.py)
-    with h5py.File(data_path, "r") as hf:
-        X = hf["X"][:]
-        y = hf["y"][:]
-    split = int(len(X) * train_frac)
-
-    X_train, y_train = X[:split], y[:split]
-    X_val, y_val = X[split:], y[split:]
+    train_path = data_path
+    if 'training' in train_path:
+        valid_path = train_path.replace("training", "validation")
+    elif 'train' in train_path:
+        valid_path = train_path.replace("train", "valid")
+    else:
+        valid_path = train_path.replace(".tfrecord", "_valid.tfrecord")
+    
+    # load to memory
+    X_train, y_train = load_tfrecord_to_memory(train_path, batch_size, n_features, is_training=True)
+    X_val, y_val = load_tfrecord_to_memory(valid_path, batch_size, n_features, is_training=False)
 
     # Get predictions
     model = keras.models.load_model(model_path)
@@ -44,7 +50,7 @@ def plot_output(model_path, data_path, config_path, output_path=None, n_bins=30)
     def tagging_power(pred, truth):
         N = len(truth)
         tag = (pred > 0.5).astype(int)
-        omega = np.mean(tag != truth)
+        omega = np.mean(tag.flatten() != truth.flatten())
         D = 1 - 2 * omega
         P = D**2
         # Binomial uncertainties
@@ -101,15 +107,15 @@ def plot_output(model_path, data_path, config_path, output_path=None, n_bins=30)
     train_densities = {}
     train_errs = {}
     for target, colour in [(0, "red"), (1, "blue")]:
-        counts_tr, _ = np.histogram(pred_train[y_train == target], bins=bins)
-        n_tr = (y_train == target).sum()
+        counts_tr, _ = np.histogram(pred_train[y_train.flatten() == target], bins=bins)
+        n_tr = (y_train.flatten() == target).sum()
         train_densities[target] = counts_tr / (n_tr * bin_width) if n_tr > 0 else counts_tr * 0.0
         train_errs[target] = np.sqrt(counts_tr) / (n_tr * bin_width) if n_tr > 0 else counts_tr * 0.0
 
-    ax.hist(pred_train[y_train == 0], bins=bins, density=True,
+    ax.hist(pred_train[y_train.flatten() == 0], bins=bins, density=True,
             histtype="stepfilled", alpha=0.35, color="red", edgecolor="red",
             label="Train (target=0)")
-    ax.hist(pred_train[y_train == 1], bins=bins, density=True,
+    ax.hist(pred_train[y_train.flatten() == 1], bins=bins, density=True,
             histtype="stepfilled", alpha=0.35, color="blue", edgecolor="blue",
             label="Train (target=1)")
 
@@ -117,8 +123,8 @@ def plot_output(model_path, data_path, config_path, output_path=None, n_bins=30)
     val_densities = {}
     val_errs = {}
     for target, colour, marker in [(0, "red", "v"), (1, "blue", "^")]:
-        counts, _ = np.histogram(pred_val[y_val == target], bins=bins)
-        n_class = (y_val == target).sum()
+        counts, _ = np.histogram(pred_val[y_val.flatten() == target], bins=bins)
+        n_class = (y_val.flatten() == target).sum()
         density = counts / (n_class * bin_width) if n_class > 0 else counts * 0.0
         err = np.sqrt(counts) / (n_class * bin_width) if n_class > 0 else counts * 0.0
         val_densities[target] = density

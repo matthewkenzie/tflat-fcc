@@ -6,15 +6,14 @@ import awkward as ak
 import numpy as np
 import h5py
 import argparse
+import tensorflow as tf
+from tqdm import tqdm
+np.random.seed(210187)
 
 import utils
 
 # Path to the fccee-tracker-pid package (sibling directory)
 # PID_PACKAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fccee-tracker-pid")
-
-# ── Maximum number of objects per event (pad/truncate to this) ──────────────
-MAX_NTRACKS = 30
-MAX_NPHOTONS = 35
 
 # ── Feature definitions ─────────────────────────────────────────────────────
 EVENT_FEATURES = ["event_p", "event_e", "event_n_charged", "event_n_neutral"]
@@ -238,7 +237,46 @@ def process(input_file, output_file, cfg):
     with uproot.recreate(output_file.replace(".h5",".root")) as outf:
         outf["training"] = branches
 
-    print(f'Saved {len(X)} events × {X.shape[1]} features to {output_file} and {output_file.replace(".h5", ".root")}')
+    # ── Save to tfrecord  ────────────────────────────────────────────────────────
+    n_samples = X.shape[0]
+
+    # shuffled index array
+    indices = np.arange(n_samples)
+    np.random.shuffle(indices)
+
+    # determine split point
+    split_idx = int(n_samples * cfg["training"]["train_valid_fraction"])
+    train_indices = indices[:split_idx]
+    valid_indices = indices[split_idx:]
+
+    def write_records(target_path, index_list):
+        print(f"Writing to {target_path}...")
+        with tf.io.TFRecordWriter(target_path) as writer:
+            for i in tqdm(index_list):
+                # Fetch single row from H5 (H5 handles this efficiently via indexing)
+                features = X[i].astype('float32')
+                label = y[i].astype('float32')
+                
+                # Create the Example protocol buffer
+                example = tf.train.Example(features=tf.train.Features(feature={
+                    'features': tf.train.Feature(float_list=tf.train.FloatList(value=features)),
+                    'label': tf.train.Feature(float_list=tf.train.FloatList(value=[label]))
+                }))
+                writer.write(example.SerializeToString())
+
+    # 3. Execute the writes
+    train_path = output_file.replace(".h5", ".tfrecord")
+    if 'training' in train_path:
+        valid_path = train_path.replace("training", "validation")
+    elif 'train' in train_path:
+        valid_path = train_path.replace("train", "valid")
+    else:
+        valid_path = train_path.replace(".tfrecord", "_valid.tfrecord")
+
+    write_records(train_path, train_indices)
+    write_records(valid_path, valid_indices)
+
+    print(f'Saved {len(X)} events × {X.shape[1]} features to {output_file}, {output_file.replace(".h5", ".root")}, {train_path} and {valid_path}')
 
 if __name__ == "__main__":
 
